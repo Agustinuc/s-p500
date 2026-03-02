@@ -131,8 +131,6 @@ def main():
         print("Datos insuficientes")
         return
 
-    historical_max = df["Close"].max()
-
     # Rolling máximo 12 meses (252 días bursátiles)
     rolling_max = df["Close"].rolling(window=252, min_periods=1).max()
 
@@ -143,24 +141,11 @@ def main():
 
     print("====================================")
     print(f"Precio actual: {current_price:.2f}")
-    print(f"Máximo 12M: {current_max_12m:.2f}")
-    print(f"Máximo histórico: {historical_max:.2f}")
     print(f"Drawdown 12M: {drawdown:.2f}%")
     print("====================================")
 
-    # Mensaje informativo diario
-    info_message = (
-        f"📊 S&P 500\n"
-        f"Precio: {current_price:.2f}\n"
-        f"Máx 12M: {current_max_12m:.2f}\n"
-        f"Máx histórico: {historical_max:.2f}\n"
-        f"Drawdown: {drawdown:.2f}%"
-    )
-
-    send_telegram(info_message)
-
     # ==============================
-    # ALERTAS ESCALONADAS
+    # ALERTAS ESCALONADAS (SOLO)
     # ==============================
 
     state = load_state()
@@ -171,16 +156,17 @@ def main():
     for level in LEVELS:
         if drawdown >= level and level not in triggered:
             alert_message = (
-                f"🚨 ALERTA S&P 500\n"
+                f"🚨 CORRECCIÓN S&P 500\n"
                 f"Caída: {drawdown:.2f}%\n"
                 f"Superó nivel −{level}%\n"
-                f"Precio: {current_price:.2f}"
+                f"Precio actual: {current_price:.2f}"
             )
             triggered.append(level)
             break
 
-    # Reset si vuelve cerca de máximos
+    # Reset automático cuando vuelve cerca de máximos
     if drawdown < 1:
+        print("Mercado recuperado. Reset niveles.")
         triggered = []
 
     save_state({"triggered": triggered})
@@ -188,6 +174,8 @@ def main():
     if alert_message:
         send_telegram(alert_message)
         print("✅ Alerta enviada")
+    else:
+        print("Sin nuevas alertas.")
 
 
 # ==============================

@@ -8,7 +8,7 @@ import requests
 # ==============================
 
 TELEGRAM_BOT_TOKEN = "8756159949:AAE-Nd2pI0mASrFH-6kbOSW_kRVGPtW7sJU"
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+TELEGRAM_CHAT_ID = "-5178095003"
 
 STATE_FILE = "sp500_state.json"
 LEVELS = [5, 10, 15, 20]

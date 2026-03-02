@@ -48,13 +48,12 @@ def main():
     df = df.sort_index()
 
     # Máximo histórico absoluto
-    historical_max = df["Close"].max()
+    historical_max = float(df["Close"].max())
+    current_price = float(df["Close"].iloc[-2])
+    current_max_12m = float(rolling_max.iloc[-2])
 
     # Máximo rolling 12 meses (252 días)
     rolling_max = df["Close"].rolling(window=252, min_periods=1).max()
-
-    current_price = df["Close"].iloc[-2]
-    current_max_12m = rolling_max.iloc[-2]
 
     drawdown = (current_max_12m - current_price) / current_max_12m * 100
 

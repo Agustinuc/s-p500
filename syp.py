@@ -4,11 +4,11 @@ import json
 import requests
 
 # ==============================
-# CONFIG
+# CONFIG (USA VARIABLES DE ENTORNO EN PRODUCCIÓN)
 # ==============================
 
-TELEGRAM_BOT_TOKEN = "8756159949:AAE-Nd2pI0mASrFH-6kbOSW_kRVGPtW7sJU"
-TELEGRAM_CHAT_ID = "-5178095003"
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 STATE_FILE = "sp500_state.json"
 LEVELS = [5, 10, 15, 20]
@@ -39,28 +39,45 @@ def send_telegram(message):
 
 def main():
 
-    # Descargar 2 años de datos del S&P 500
-    df = yf.download("^GSPC", period="2y", progress=False)
+    df = yf.download("^GSPC", period="max", progress=False)
 
-    if df is None or len(df) < 260:
+    if df is None or len(df) < 300:
         print("Datos insuficientes")
         return
 
     df = df.sort_index()
 
+    # Máximo histórico absoluto
+    historical_max = df["Close"].max()
+
     # Máximo rolling 12 meses (252 días)
     rolling_max = df["Close"].rolling(window=252, min_periods=1).max()
 
     current_price = df["Close"].iloc[-2]
-    current_max = rolling_max.iloc[-2]
+    current_max_12m = rolling_max.iloc[-2]
 
-    drawdown = (current_max - current_price) / current_max * 100
+    drawdown = (current_max_12m - current_price) / current_max_12m * 100
 
     print(f"Precio actual: {current_price:.2f}")
-    print(f"Máximo 12M: {current_max:.2f}")
+    print(f"Máximo 12M: {current_max_12m:.2f}")
+    print(f"Máximo histórico: {historical_max:.2f}")
     print(f"Drawdown: {drawdown:.2f}%")
 
-    # Cargar estado previo
+    # 🔎 MENSAJE INFORMATIVO SIEMPRE
+    info_message = (
+        f"📊 Estado S&P 500\n"
+        f"Precio actual: {current_price:.2f}\n"
+        f"Máximo 12M: {current_max_12m:.2f}\n"
+        f"Máximo histórico: {historical_max:.2f}\n"
+        f"Drawdown 12M: {drawdown:.2f}%"
+    )
+
+    send_telegram(info_message)
+
+    # ==============================
+    # ALERTAS POR NIVELES
+    # ==============================
+
     if os.path.exists(STATE_FILE):
         with open(STATE_FILE, "r") as f:
             state = json.load(f)
@@ -68,13 +85,12 @@ def main():
         state = {"triggered": []}
 
     triggered = state["triggered"]
-    message = None
+    alert_message = None
 
-    # Detectar nuevos niveles
     for level in LEVELS:
         if drawdown >= level and level not in triggered:
-            message = (
-                f"ALERTA S&P 500\n"
+            alert_message = (
+                f"🚨 ALERTA S&P 500\n"
                 f"Caída: {drawdown:.2f}%\n"
                 f"Superó nivel −{level}%\n"
                 f"Precio actual: {current_price:.2f}"
@@ -82,17 +98,15 @@ def main():
             triggered.append(level)
             break
 
-    # Reset si vuelve a nuevo máximo (menos de 1% de caída)
+    # Reset si vuelve cerca del máximo
     if drawdown < 1:
         triggered = []
 
-    # Guardar estado
     with open(STATE_FILE, "w") as f:
         json.dump({"triggered": triggered}, f)
 
-    # Enviar alerta
-    if message:
-        send_telegram(message)
+    if alert_message:
+        send_telegram(alert_message)
         print("Alerta enviada")
 
 

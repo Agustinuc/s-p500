@@ -9,9 +9,13 @@ import traceback
 # CONFIGURACIÓN
 # ==============================
 
-SYMBOL = "^GSPC"
-LEVELS = [5, 10, 15, 20]  # niveles de alerta en %
-STATE_FILE = "sp500_state.json"
+SYMBOLS = {
+    "^GSPC": "S&P 500",
+    "^IPSA": "IPSA Chile"
+}
+
+LEVELS = [5, 10, 15, 20]
+STATE_FILE = "market_state.json"
 
 TELEGRAM_BOT_TOKEN = "8756159949:AAE-Nd2pI0mASrFH-6kbOSW_kRVGPtW7sJU"
 TELEGRAM_CHAT_ID = "-5178095003"
@@ -40,54 +44,32 @@ def send_telegram(message):
 
 
 # ==============================
-# DATA LOADER ROBUSTO
+# DATA LOADER
 # ==============================
 
-def get_data_yf(symbol, interval="1d", period="max"):
+def get_data_yf(symbol):
     try:
         df = yf.download(
             tickers=symbol,
-            interval=interval,
-            period=period,
+            interval="1d",
+            period="max",
             progress=False,
             auto_adjust=False
         )
 
         if df is None or df.empty:
-            print(f"⚠️ yfinance: No hay datos para {symbol}")
             return None
 
-        # 🔥 Aplanar MultiIndex si existe
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
 
-        # Normalizar nombres columnas
         df = df.rename(columns=str.title)
 
-        required_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
-
-        # Intentar mapear columnas si faltan
-        if not all(col in df.columns for col in required_cols):
-            column_mapping = {}
-            for col in required_cols:
-                matching_cols = [c for c in df.columns if col.lower() in c.lower()]
-                if matching_cols:
-                    column_mapping[matching_cols[0]] = col
-
-            if column_mapping:
-                df = df.rename(columns=column_mapping)
-                print(f"DEBUG: Columnas renombradas: {column_mapping}")
-
-        available_cols = [col for col in required_cols if col in df.columns]
-        df = df[available_cols]
-
         if 'Close' not in df.columns:
-            print("❌ No existe columna Close")
             return None
 
         df = df.sort_index()
 
-        # Manejo timezone
         if df.index.tz is None:
             df.index = df.index.tz_localize("UTC")
 
@@ -104,14 +86,14 @@ def get_data_yf(symbol, interval="1d", period="max"):
 
 
 # ==============================
-# ESTADO PERSISTENTE
+# ESTADO
 # ==============================
 
 def load_state():
     if os.path.exists(STATE_FILE):
         with open(STATE_FILE, "r") as f:
             return json.load(f)
-    return {"triggered": []}
+    return {}
 
 
 def save_state(state):
@@ -125,57 +107,59 @@ def save_state(state):
 
 def main():
 
-    df = get_data_yf(SYMBOL, interval="1d", period="max")
-
-    if df is None or len(df) < 300:
-        print("Datos insuficientes")
-        return
-
-    # Rolling máximo 12 meses (252 días bursátiles)
-    rolling_max = df["Close"].rolling(window=252, min_periods=1).max()
-
-    current_price = df["Close"].iloc[-2]  # vela cerrada
-    current_max_12m = rolling_max.iloc[-2]
-
-    drawdown = (current_max_12m - current_price) / current_max_12m * 100
-
-    print("====================================")
-    print(f"Precio actual: {current_price:.2f}")
-    print(f"Drawdown 12M: {drawdown:.2f}%")
-    print("====================================")
-
-    # ==============================
-    # ALERTAS ESCALONADAS (SOLO)
-    # ==============================
-
     state = load_state()
-    triggered = state["triggered"]
 
-    alert_message = None
+    for symbol, name in SYMBOLS.items():
 
-    for level in LEVELS:
-        if drawdown >= level and level not in triggered:
-            alert_message = (
-                f"🚨 CORRECCIÓN S&P 500\n"
-                f"Caída: {drawdown:.2f}%\n"
-                f"Superó nivel −{level}%\n"
-                f"Precio actual: {current_price:.2f}"
-            )
-            triggered.append(level)
-            break
+        print(f"\n===== Analizando {name} =====")
 
-    # Reset automático cuando vuelve cerca de máximos
-    if drawdown < 1:
-        print("Mercado recuperado. Reset niveles.")
-        triggered = []
+        df = get_data_yf(symbol)
 
-    save_state({"triggered": triggered})
+        if df is None or len(df) < 300:
+            print("Datos insuficientes")
+            continue
 
-    if alert_message:
-        send_telegram(alert_message)
-        print("✅ Alerta enviada")
-    else:
-        print("Sin nuevas alertas.")
+        rolling_max = df["Close"].rolling(window=252, min_periods=1).max()
+
+        current_price = df["Close"].iloc[-2]
+        current_max_12m = rolling_max.iloc[-2]
+
+        drawdown = (current_max_12m - current_price) / current_max_12m * 100
+
+        print(f"Precio actual: {current_price:.2f}")
+        print(f"Drawdown 12M: {drawdown:.2f}%")
+
+        # Estado por índice
+        if symbol not in state:
+            state[symbol] = {"triggered": []}
+
+        triggered = state[symbol]["triggered"]
+        alert_message = None
+
+        for level in LEVELS:
+            if drawdown >= level and level not in triggered:
+                alert_message = (
+                    f"🚨 CORRECCIÓN {name}\n"
+                    f"Caída: {drawdown:.2f}%\n"
+                    f"Superó nivel −{level}%\n"
+                    f"Precio actual: {current_price:.2f}"
+                )
+                triggered.append(level)
+                break
+
+        # Reset si vuelve cerca de máximos
+        if drawdown < 1:
+            triggered = []
+
+        state[symbol]["triggered"] = triggered
+
+        if alert_message:
+            send_telegram(alert_message)
+            print("✅ Alerta enviada")
+        else:
+            print("Sin nuevas alertas.")
+
+    save_state(state)
 
 
 # ==============================
